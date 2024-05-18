@@ -1,9 +1,9 @@
 import * as uuid from 'uuid';
 import * as core from '@actions/core';
-import {Docker} from '@docker/actions-toolkit/lib/docker/docker';
-import {Util} from '@docker/actions-toolkit/lib/util';
-import {Toolkit} from '@docker/actions-toolkit/lib/toolkit';
-import {Node} from '@docker/actions-toolkit/lib/types/builder';
+import { Docker } from '@docker/actions-toolkit/lib/docker/docker';
+import { Util } from '@docker/actions-toolkit/lib/util';
+import { Toolkit } from '@docker/actions-toolkit/lib/toolkit';
+import { Node } from '@docker/actions-toolkit/lib/types/builder';
 
 export const builderNodeEnvPrefix = 'BUILDER_NODE';
 
@@ -29,7 +29,7 @@ export async function getInputs(): Promise<Inputs> {
     version: core.getInput('version'),
     name: await getBuilderName(core.getInput('driver') || 'docker-container'),
     driver: core.getInput('driver') || 'docker-container',
-    driverOpts: Util.getInputList('driver-opts', {ignoreComma: true, quote: false}),
+    driverOpts: Util.getInputList('driver-opts', { ignoreComma: true, quote: false }),
     buildkitdFlags: core.getInput('buildkitd-flags') || '--allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host',
     platforms: Util.getInputList('platforms'),
     install: core.getBooleanInput('install'),

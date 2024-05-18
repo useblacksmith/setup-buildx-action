@@ -2,13 +2,13 @@ import * as fs from 'fs';
 import * as yaml from 'js-yaml';
 import * as core from '@actions/core';
 import * as actionsToolkit from '@docker/actions-toolkit';
-import {Buildx} from '@docker/actions-toolkit/lib/buildx/buildx';
-import {Builder} from '@docker/actions-toolkit/lib/buildx/builder';
-import {Docker} from '@docker/actions-toolkit/lib/docker/docker';
-import {Exec} from '@docker/actions-toolkit/lib/exec';
-import {Toolkit} from '@docker/actions-toolkit/lib/toolkit';
-import {Util} from '@docker/actions-toolkit/lib/util';
-import {Node} from '@docker/actions-toolkit/lib/types/builder';
+import { Buildx } from '@docker/actions-toolkit/lib/buildx/buildx';
+import { Builder } from '@docker/actions-toolkit/lib/buildx/builder';
+import { Docker } from '@docker/actions-toolkit/lib/docker/docker';
+import { Exec } from '@docker/actions-toolkit/lib/exec';
+import { Toolkit } from '@docker/actions-toolkit/lib/toolkit';
+import { Util } from '@docker/actions-toolkit/lib/util';
+import { Node } from '@docker/actions-toolkit/lib/types/builder';
 
 import * as context from './context';
 import * as stateHelper from './state-helper';
@@ -63,7 +63,7 @@ actionsToolkit.run(
     stateHelper.setBuilderName(inputs.name);
     stateHelper.setBuilderDriver(inputs.driver);
 
-    fs.mkdirSync(Buildx.certsDir, {recursive: true});
+    fs.mkdirSync(Buildx.certsDir, { recursive: true });
     stateHelper.setCertsDir(Buildx.certsDir);
 
     if (inputs.driver !== 'docker') {
@@ -77,6 +77,7 @@ actionsToolkit.run(
           inputs.driverOpts = [...inputs.driverOpts, ...certsDriverOpts];
         }
         const createCmd = await toolkit.buildx.getCommand(await context.getCreateArgs(inputs, toolkit));
+        core.info(`Creating builder with command: ${createCmd.command}`);
         await Exec.getExecOutput(createCmd.command, createCmd.args, {
           ignoreReturnCode: true
         }).then(res => {
@@ -195,8 +196,8 @@ actionsToolkit.run(
 
     if (stateHelper.builderDriver != 'docker' && stateHelper.builderName.length > 0) {
       await core.group(`Removing builder`, async () => {
-        const buildx = new Buildx({standalone: stateHelper.standalone});
-        const builder = new Builder({buildx: buildx});
+        const buildx = new Buildx({ standalone: stateHelper.standalone });
+        const builder = new Builder({ buildx: buildx });
         if (await builder.exists(stateHelper.builderName)) {
           const rmCmd = await buildx.getCommand(['rm', stateHelper.builderName]);
           await Exec.getExecOutput(rmCmd.command, rmCmd.args, {
@@ -214,7 +215,7 @@ actionsToolkit.run(
 
     if (stateHelper.certsDir.length > 0 && fs.existsSync(stateHelper.certsDir)) {
       await core.group(`Cleaning up certificates`, async () => {
-        fs.rmSync(stateHelper.certsDir, {recursive: true});
+        fs.rmSync(stateHelper.certsDir, { recursive: true });
       });
     }
   }
