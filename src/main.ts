@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as yaml from 'js-yaml';
 import * as core from '@actions/core';
 import * as actionsToolkit from '@docker/actions-toolkit';
 import { Buildx } from '@docker/actions-toolkit/lib/buildx/buildx';
@@ -8,15 +7,178 @@ import { Docker } from '@docker/actions-toolkit/lib/docker/docker';
 import { Exec } from '@docker/actions-toolkit/lib/exec';
 import { Toolkit } from '@docker/actions-toolkit/lib/toolkit';
 import { Util } from '@docker/actions-toolkit/lib/util';
-import { Node } from '@docker/actions-toolkit/lib/types/builder';
+import { promisify } from 'util';
+import { exec } from 'child_process';
+import portfinder from 'portfinder';
+import * as TOML from '@iarna/toml';
+
 
 import * as context from './context';
 import * as stateHelper from './state-helper';
 
+const supportedDockerDriver = 'remote';
+const mountPoint = '/var/lib/buildkit';
+const device = '/dev/vdb';
+
+
+const execAsync = promisify(exec);
+
+async function checkBlockDevice(device: string): Promise<boolean> {
+  try {
+    await execAsync(`lsblk ${device}`);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Function to gracefully shut down the buildkitd process
+async function shutdownBuildkitd(): Promise<void> {
+  try {
+    await execAsync(`sudo pkill -TERM buildkitd`);
+  } catch (error) {
+    core.error('error shutting down buildkitd process:', error);
+    throw error;
+  }
+}
+
+async function installBuildkitd() {
+  try {
+    let downloadUrl = '';
+    let tarFile = '';
+
+    downloadUrl = 'https://github.com/moby/buildkit/releases/download/v0.13.2/buildkit-v0.13.2.linux-amd64.tar.gz';
+    tarFile = 'buildkit-v0.13.2.linux-amd64.tar.gz';
+
+    await execAsync(`sudo wget ${downloadUrl}`);
+    await execAsync(`sudo tar -xvf ${tarFile}`);
+    await execAsync(`sudo mv bin/* /usr/local/bin/`);
+
+    core.debug('buildKit installed successfully');
+  } catch (error) {
+    core.error('error installing BuildKit:', error);
+    throw error;
+  }
+}
+
+async function getDiskSize(device: string): Promise<number> {
+  try {
+    const { stdout } = await execAsync(`sudo lsblk -b -n -o SIZE ${device}`);
+    const sizeInBytes = parseInt(stdout.trim(), 10);
+    if (isNaN(sizeInBytes)) {
+      throw new Error('Failed to parse disk size');
+    }
+    return sizeInBytes;
+  } catch (error) {
+    console.error(`Error getting disk size: ${error.message}`);
+    throw error;
+  }
+}
+
+async function writeBuildkitdTomlFile(): Promise<void> {
+  const diskSize = await getDiskSize(device);
+  core.info(`disk size is ${diskSize}`);
+  const jsonConfig: TOML.JsonMap = {
+    worker: {
+      oci: {
+        enabled: true,
+        gc: true,
+        gckeepstorage: diskSize,
+        gcpolicy: [
+          {
+            keepBytes: diskSize,
+            keepDuration: 172800,
+          },
+          {
+            all: true,
+            keepBytes: diskSize
+          }
+        ]
+      }
+    }
+  };
+
+  const tomlString = TOML.stringify(jsonConfig);
+
+  try {
+    await execAsync(`sudo touch buildkitd.toml`);
+    await execAsync(`sudo chmod 666 buildkitd.toml`);
+    await execAsync(`echo "${tomlString}" > buildkitd.toml`);
+    core.debug(`TOML configuration is ${tomlString}`);
+  } catch (err) {
+    core.warning('error writing TOML configuration:', err);
+    throw err;
+  }
+}
+
+
+async function startBuildkitd(port: number): Promise<string> {
+  try {
+    await writeBuildkitdTomlFile();
+    const addr = `tcp://0.0.0.0:${port}`;
+    const { stdout: startStdout, stderr: startStderr } = await execAsync(
+      `sudo nohup buildkitd --addr ${addr} --allow-insecure-entitlement security.insecure --config=buildkitd.toml --allow-insecure-entitlement network.host > buildkitd.log 2>&1 &`,
+    );
+
+    if (startStderr) {
+      throw new Error(`error starting buildkitd service: ${startStderr}`);
+    }
+    core.debug(`buildkitd daemon started successfully ${startStdout}`);
+
+    const { stdout, stderr } = await execAsync(`pgrep -f buildkitd`);
+    if (stderr) {
+      throw new Error(`error finding buildkitd PID: ${stderr}`);
+    }
+    return addr;
+  } catch (error) {
+    core.error('failed to start buildkitd daemon:', error);
+    throw error;
+  }
+}
+
+async function findPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    portfinder.getPort({
+      port: 49152,
+      stopPort: 65535
+    }, (error, port) => {
+      if (error) {
+        console.error(`error finding port: ${error.message}`);
+        reject(error);
+      }
+      resolve(port);
+    });
+  });
+}
+
+
 actionsToolkit.run(
   // main
   async () => {
+    let isStickyDisksEnabled = false;
+    try {
+      isStickyDisksEnabled = await checkBlockDevice(device);
+      if (isStickyDisksEnabled) {
+        stateHelper.setStickyDisksEnabled('true');
+        await execAsync(`sudo mkdir -p ${mountPoint}`);
+        await execAsync(`sudo mount ${device} ${mountPoint}`);
+        core.debug(`${device} has been mounted to ${mountPoint}`);
+      }
+    } catch (error) {
+      core.error('error setting up sticky disks:', error);
+      // Carry on regardless of sticky disks error.
+    }
+    // Start the buildkitd daemon.
+    var port = await findPort();
+    await installBuildkitd();
+    core.debug('starting buildkitd daemon');
+    var buildkitdAddr = await startBuildkitd(port);
+    core.debug(`buildkitd daemon started at addr ${buildkitdAddr}`);
+
     const inputs: context.Inputs = await context.getInputs();
+    // Override inputs.driver to the only supported driver.
+    inputs.endpoint = buildkitdAddr;
+    inputs.driver = supportedDockerDriver;
     stateHelper.setCleanup(inputs.cleanup);
 
     const toolkit = new Toolkit();
@@ -68,14 +230,6 @@ actionsToolkit.run(
 
     if (inputs.driver !== 'docker') {
       await core.group(`Creating a new builder instance`, async () => {
-        const certsDriverOpts = Buildx.resolveCertsDriverOpts(inputs.driver, inputs.endpoint, {
-          cacert: process.env[`${context.builderNodeEnvPrefix}_0_AUTH_TLS_CACERT`],
-          cert: process.env[`${context.builderNodeEnvPrefix}_0_AUTH_TLS_CERT`],
-          key: process.env[`${context.builderNodeEnvPrefix}_0_AUTH_TLS_KEY`]
-        });
-        if (certsDriverOpts.length > 0) {
-          inputs.driverOpts = [...inputs.driverOpts, ...certsDriverOpts];
-        }
         const createCmd = await toolkit.buildx.getCommand(await context.getCreateArgs(inputs, toolkit));
         core.info(`Creating builder with command: ${createCmd.command}`);
         await Exec.getExecOutput(createCmd.command, createCmd.args, {
@@ -85,32 +239,6 @@ actionsToolkit.run(
             throw new Error(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? 'unknown error');
           }
         });
-      });
-    }
-
-    if (inputs.append) {
-      await core.group(`Appending node(s) to builder`, async () => {
-        let nodeIndex = 1;
-        const nodes = yaml.load(inputs.append) as Node[];
-        for (const node of nodes) {
-          const certsDriverOpts = Buildx.resolveCertsDriverOpts(inputs.driver, `${node.endpoint}`, {
-            cacert: process.env[`${context.builderNodeEnvPrefix}_${nodeIndex}_AUTH_TLS_CACERT`],
-            cert: process.env[`${context.builderNodeEnvPrefix}_${nodeIndex}_AUTH_TLS_CERT`],
-            key: process.env[`${context.builderNodeEnvPrefix}_${nodeIndex}_AUTH_TLS_KEY`]
-          });
-          if (certsDriverOpts.length > 0) {
-            node['driver-opts'] = [...(node['driver-opts'] || []), ...certsDriverOpts];
-          }
-          const appendCmd = await toolkit.buildx.getCommand(await context.getAppendArgs(inputs, node, toolkit));
-          await Exec.getExecOutput(appendCmd.command, appendCmd.args, {
-            ignoreReturnCode: true
-          }).then(res => {
-            if (res.stderr.length > 0 && res.exitCode != 0) {
-              throw new Error(`Failed to append node ${node.name}: ${res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? 'unknown error'}`);
-            }
-          });
-          nodeIndex++;
-        }
       });
     }
 
@@ -143,6 +271,7 @@ actionsToolkit.run(
 
     const builderInspect = await toolkit.builder.inspect(inputs.name);
     const firstNode = builderInspect.nodes[0];
+    const containerName = `${Buildx.containerNamePrefix}${firstNode.name}`;
 
     await core.group(`Inspect builder`, async () => {
       const reducedPlatforms: Array<string> = [];
@@ -164,7 +293,7 @@ actionsToolkit.run(
     });
 
     if (!standalone && builderInspect.driver == 'docker-container') {
-      stateHelper.setContainerName(`${Buildx.containerNamePrefix}${firstNode.name}`);
+      stateHelper.setContainerName(`${containerName}`);
       await core.group(`BuildKit version`, async () => {
         for (const node of builderInspect.nodes) {
           const buildkitVersion = await toolkit.buildkit.getVersion(node);
@@ -199,6 +328,27 @@ actionsToolkit.run(
         const buildx = new Buildx({ standalone: stateHelper.standalone });
         const builder = new Builder({ buildx: buildx });
         if (await builder.exists(stateHelper.builderName)) {
+          const stopCmd = await buildx.getCommand(['stop', stateHelper.builderName]);
+          core.debug(`Stopping builder with command: ${stopCmd.command}`);
+          await Exec.getExecOutput(stopCmd.command, stopCmd.args, {
+            ignoreReturnCode: true
+          })
+
+          // If sticky disks are enabled, unmount the mount point.
+          try {
+            if (stateHelper.isStickyDisksEnabled) {
+              await shutdownBuildkitd();
+              await execAsync(`sudo umount ${mountPoint}`);
+              core.debug(`${device} has been unmounted`);
+              // Write /stickydisk/commit.txt to the filesystem to signal that the sticky disks are mounted.
+              var stickyDiskCommitFile = "/stickydisk/commit.txt";
+              await execAsync(`sudo mkdir -p /stickydisk`);
+              await execAsync(`sudo touch ${stickyDiskCommitFile}`);
+            }
+          } catch (error) {
+            core.error('error cleaning up sticky disks:', error);
+          }
+
           const rmCmd = await buildx.getCommand(['rm', stateHelper.builderName]);
           await Exec.getExecOutput(rmCmd.command, rmCmd.args, {
             ignoreReturnCode: true

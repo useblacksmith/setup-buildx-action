@@ -7,6 +7,7 @@ export const builderDriver = process.env['STATE_builderDriver'] || '';
 export const containerName = process.env['STATE_containerName'] || '';
 export const certsDir = process.env['STATE_certsDir'] || '';
 export const cleanup = /true/i.test(process.env['STATE_cleanup'] || '');
+export const isStickyDisksEnabled = !!process.env['STATE_isStickyDisksEnabled'];
 
 export function setDebug(debug: string) {
   core.saveState('isDebug', debug);
@@ -34,4 +35,8 @@ export function setCertsDir(certsDir: string) {
 
 export function setCleanup(cleanup: boolean) {
   core.saveState('cleanup', cleanup);
+}
+
+export function setStickyDisksEnabled(isStickyDisksEnabled: string) {
+  core.saveState('isStickyDisksEnabled', isStickyDisksEnabled);
 }
