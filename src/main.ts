@@ -165,7 +165,7 @@ actionsToolkit.run(
         core.debug(`${device} has been mounted to ${mountPoint}`);
       }
     } catch (error) {
-      core.error('error setting up sticky disks:', error);
+      core.warning('error setting up sticky disks:', error.message);
       // Carry on regardless of sticky disks error.
     }
     // Start the buildkitd daemon.
