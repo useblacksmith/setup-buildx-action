@@ -11,17 +11,90 @@ import { promisify } from 'util';
 import { exec } from 'child_process';
 import portfinder from 'portfinder';
 import * as TOML from '@iarna/toml';
+import axios from 'axios';
 
 
 import * as context from './context';
 import * as stateHelper from './state-helper';
+import { get } from 'http';
 
 const supportedDockerDriver = 'remote';
 const mountPoint = '/var/lib/buildkit';
 const device = '/dev/vdb';
+const mmdsIPv4Addr = "169.254.169.254";
 
 
 const execAsync = promisify(exec);
+
+function getEnvVar(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Environment variable ${name} is not set.`);
+  }
+  return value;
+}
+
+function sendLoadStickyDisksRequest() {
+  try {
+    const port = getEnvVar('VSOCK_PORT');
+    const command = `echo "load" | socat -t=15 - VSOCK-CONNECT:2:${port}`;
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        core.error(`Error executing command: ${error.message}`);
+        return;
+      }
+      if (stderr) {
+        core.error(`stderr: ${stderr}`);
+        return;
+      }
+      core.debug(`stdout: ${stdout}`);
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function getMetadata(endpoint: string): Promise<string> {
+  try {
+    const putTokenResponse = await axios.put(`http://${mmdsIPv4Addr}/latest/api/token`, null, {
+      headers: {
+        "X-metadata-token-ttl-seconds": "21600"
+      }
+    });
+    const token = putTokenResponse.data;
+    const getResponse = await axios.get(`http://${mmdsIPv4Addr}/${endpoint}`, {
+      headers: {
+        "X-metadata-token": token
+      }
+    });
+    const responseData = typeof getResponse.data === 'string' ? getResponse.data : JSON.stringify(getResponse.data);
+    return responseData;
+  } catch (error) {
+    core.debug(`error fetching metadata: ${error}`);
+    throw error;
+  }
+}
+
+async function retryCommand(sleepTime: number, command: () => Promise<string>): Promise<string> {
+  let retryAttempts = 0;
+  while (true) {
+    if (retryAttempts > 10) {
+      throw new Error('Maximum number of retries exceeded');
+    }
+    try {
+      const result = await command();
+      if (result && !result.includes("Resource not found")) {
+        core.debug(`Command result: ${result}`);
+        return result;
+      }
+    } catch (error) {
+      core.debug(`Command failed: ${error}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, sleepTime * 1000));
+    retryAttempts++;
+  }
+}
 
 async function checkBlockDevice(device: string): Promise<boolean> {
   try {
@@ -156,9 +229,20 @@ actionsToolkit.run(
   // main
   async () => {
     let isStickyDisksEnabled = false;
+    const sleepTime = 1; // seconds of retries
     try {
-      isStickyDisksEnabled = await checkBlockDevice(device);
-      if (isStickyDisksEnabled) {
+      sendLoadStickyDisksRequest();
+      const stickyDiskIsLoaded = await retryCommand(sleepTime, () => getMetadata('sticky_disk_loaded'));
+      if (stickyDiskIsLoaded == "true") {
+        isStickyDisksEnabled = true;
+      }
+    } catch (error) {
+      core.warning(`error fetching sticky disks metadata: ${error}`);
+      // Carry on regardless of sticky disks error.
+    }
+    try {
+      let blockDeviceIsPresent = await checkBlockDevice(device);
+      if (isStickyDisksEnabled && blockDeviceIsPresent) {
         stateHelper.setStickyDisksEnabled('true');
         await execAsync(`sudo mkdir -p ${mountPoint}`);
         await execAsync(`sudo mount ${device} ${mountPoint}`);
