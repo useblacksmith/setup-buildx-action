@@ -1,28 +1,23 @@
 import * as fs from 'fs';
 import * as core from '@actions/core';
 import * as actionsToolkit from '@docker/actions-toolkit';
-import { Buildx } from '@docker/actions-toolkit/lib/buildx/buildx';
-import { Builder } from '@docker/actions-toolkit/lib/buildx/builder';
-import { Docker } from '@docker/actions-toolkit/lib/docker/docker';
-import { Exec } from '@docker/actions-toolkit/lib/exec';
-import { Toolkit } from '@docker/actions-toolkit/lib/toolkit';
-import { Util } from '@docker/actions-toolkit/lib/util';
-import { promisify } from 'util';
-import { exec } from 'child_process';
-import portfinder from 'portfinder';
+import {Buildx} from '@docker/actions-toolkit/lib/buildx/buildx';
+import {Builder} from '@docker/actions-toolkit/lib/buildx/builder';
+import {Docker} from '@docker/actions-toolkit/lib/docker/docker';
+import {Exec} from '@docker/actions-toolkit/lib/exec';
+import {Toolkit} from '@docker/actions-toolkit/lib/toolkit';
+import {Util} from '@docker/actions-toolkit/lib/util';
+import {promisify} from 'util';
+import {exec} from 'child_process';
 import * as TOML from '@iarna/toml';
 import axios from 'axios';
 
-
 import * as context from './context';
 import * as stateHelper from './state-helper';
-import { get } from 'http';
 
 const supportedDockerDriver = 'remote';
-const mountPoint = '/var/lib/buildkit';
 const device = '/dev/vdb';
-const mmdsIPv4Addr = "169.254.169.254";
-
+const mmdsIPv4Addr = '169.254.169.254';
 
 const execAsync = promisify(exec);
 
@@ -34,38 +29,17 @@ function getEnvVar(name: string): string {
   return value;
 }
 
-function sendLoadStickyDisksRequest() {
-  try {
-    const port = getEnvVar('VSOCK_PORT');
-    const command = `echo "load" | socat -t=15 - VSOCK-CONNECT:2:${port}`;
-
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        core.error(`Error executing command: ${error.message}`);
-        return;
-      }
-      if (stderr) {
-        core.error(`stderr: ${stderr}`);
-        return;
-      }
-      core.debug(`stdout: ${stdout}`);
-    });
-  } catch (error) {
-    throw error;
-  }
-}
-
 async function getMetadata(endpoint: string): Promise<string> {
   try {
     const putTokenResponse = await axios.put(`http://${mmdsIPv4Addr}/latest/api/token`, null, {
       headers: {
-        "X-metadata-token-ttl-seconds": "21600"
+        'X-metadata-token-ttl-seconds': '21600'
       }
     });
     const token = putTokenResponse.data;
     const getResponse = await axios.get(`http://${mmdsIPv4Addr}/${endpoint}`, {
       headers: {
-        "X-metadata-token": token
+        'X-metadata-token': token
       }
     });
     const responseData = typeof getResponse.data === 'string' ? getResponse.data : JSON.stringify(getResponse.data);
@@ -84,7 +58,7 @@ async function retryCommand(sleepTime: number, command: () => Promise<string>): 
     }
     try {
       const result = await command();
-      if (result && !result.includes("Resource not found")) {
+      if (result && !result.includes('Resource not found')) {
         core.debug(`Command result: ${result}`);
         return result;
       }
@@ -93,15 +67,6 @@ async function retryCommand(sleepTime: number, command: () => Promise<string>): 
     }
     await new Promise(resolve => setTimeout(resolve, sleepTime * 1000));
     retryAttempts++;
-  }
-}
-
-async function checkBlockDevice(device: string): Promise<boolean> {
-  try {
-    await execAsync(`lsblk ${device}`);
-    return true;
-  } catch (error) {
-    return false;
   }
 }
 
@@ -136,7 +101,7 @@ async function installBuildkitd() {
 
 async function getDiskSize(device: string): Promise<number> {
   try {
-    const { stdout } = await execAsync(`sudo lsblk -b -n -o SIZE ${device}`);
+    const {stdout} = await execAsync(`sudo lsblk -b -n -o SIZE ${device}`);
     const sizeInBytes = parseInt(stdout.trim(), 10);
     if (isNaN(sizeInBytes)) {
       throw new Error('Failed to parse disk size');
@@ -160,7 +125,7 @@ async function writeBuildkitdTomlFile(): Promise<void> {
         gcpolicy: [
           {
             keepBytes: diskSize,
-            keepDuration: 172800,
+            keepDuration: 172800
           },
           {
             all: true,
@@ -184,79 +149,12 @@ async function writeBuildkitdTomlFile(): Promise<void> {
   }
 }
 
-
-async function startBuildkitd(port: number): Promise<string> {
-  try {
-    await writeBuildkitdTomlFile();
-    const addr = `tcp://0.0.0.0:${port}`;
-    const { stdout: startStdout, stderr: startStderr } = await execAsync(
-      `sudo nohup buildkitd --addr ${addr} --allow-insecure-entitlement security.insecure --config=buildkitd.toml --allow-insecure-entitlement network.host > buildkitd.log 2>&1 &`,
-    );
-
-    if (startStderr) {
-      throw new Error(`error starting buildkitd service: ${startStderr}`);
-    }
-    core.debug(`buildkitd daemon started successfully ${startStdout}`);
-
-    const { stdout, stderr } = await execAsync(`pgrep -f buildkitd`);
-    if (stderr) {
-      throw new Error(`error finding buildkitd PID: ${stderr}`);
-    }
-    return addr;
-  } catch (error) {
-    core.error('failed to start buildkitd daemon:', error);
-    throw error;
-  }
-}
-
-async function findPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    portfinder.getPort({
-      port: 49152,
-      stopPort: 65535
-    }, (error, port) => {
-      if (error) {
-        console.error(`error finding port: ${error.message}`);
-        reject(error);
-      }
-      resolve(port);
-    });
-  });
-}
-
-
 actionsToolkit.run(
   // main
   async () => {
-    let isStickyDisksEnabled = false;
-    const sleepTime = 1; // seconds of retries
-    try {
-      sendLoadStickyDisksRequest();
-      const stickyDiskIsLoaded = await retryCommand(sleepTime, () => getMetadata('sticky_disk_loaded'));
-      if (stickyDiskIsLoaded == "true") {
-        isStickyDisksEnabled = true;
-      }
-    } catch (error) {
-      core.warning(`error fetching sticky disks metadata: ${error}`);
-      // Carry on regardless of sticky disks error.
-    }
-    try {
-      let blockDeviceIsPresent = await checkBlockDevice(device);
-      if (isStickyDisksEnabled && blockDeviceIsPresent) {
-        stateHelper.setStickyDisksEnabled('true');
-        await execAsync(`sudo mkdir -p ${mountPoint}`);
-        await execAsync(`sudo mount ${device} ${mountPoint}`);
-        core.debug(`${device} has been mounted to ${mountPoint}`);
-      }
-    } catch (error) {
-      core.warning('error setting up sticky disks:', error.message);
-      // Carry on regardless of sticky disks error.
-    }
     // Start the buildkitd daemon.
-    var port = await findPort();
-    await installBuildkitd();
-    core.debug('starting buildkitd daemon');
-    var buildkitdAddr = await startBuildkitd(port);
+    core.debug('creating remote builder');
+    const buildkitdAddr = 'tcp://54.90.77.211:4242';
     core.debug(`buildkitd daemon started at addr ${buildkitdAddr}`);
 
     const inputs: context.Inputs = await context.getInputs();
@@ -309,7 +207,7 @@ actionsToolkit.run(
     stateHelper.setBuilderName(inputs.name);
     stateHelper.setBuilderDriver(inputs.driver);
 
-    fs.mkdirSync(Buildx.certsDir, { recursive: true });
+    fs.mkdirSync(Buildx.certsDir, {recursive: true});
     stateHelper.setCertsDir(Buildx.certsDir);
 
     if (inputs.driver !== 'docker') {
@@ -409,30 +307,14 @@ actionsToolkit.run(
 
     if (stateHelper.builderDriver != 'docker' && stateHelper.builderName.length > 0) {
       await core.group(`Removing builder`, async () => {
-        const buildx = new Buildx({ standalone: stateHelper.standalone });
-        const builder = new Builder({ buildx: buildx });
+        const buildx = new Buildx({standalone: stateHelper.standalone});
+        const builder = new Builder({buildx: buildx});
         if (await builder.exists(stateHelper.builderName)) {
           const stopCmd = await buildx.getCommand(['stop', stateHelper.builderName]);
           core.debug(`Stopping builder with command: ${stopCmd.command}`);
           await Exec.getExecOutput(stopCmd.command, stopCmd.args, {
             ignoreReturnCode: true
-          })
-
-          // If sticky disks are enabled, unmount the mount point.
-          try {
-            if (stateHelper.isStickyDisksEnabled) {
-              await shutdownBuildkitd();
-              await execAsync(`sudo umount ${mountPoint}`);
-              core.debug(`${device} has been unmounted`);
-              // Write /stickydisk/commit.txt to the filesystem to signal that the sticky disks are mounted.
-              var stickyDiskCommitFile = "/stickydisk/commit.txt";
-              await execAsync(`sudo mkdir -p /stickydisk`);
-              await execAsync(`sudo touch ${stickyDiskCommitFile}`);
-            }
-          } catch (error) {
-            core.error('error cleaning up sticky disks:', error);
-          }
-
+          });
           const rmCmd = await buildx.getCommand(['rm', stateHelper.builderName]);
           await Exec.getExecOutput(rmCmd.command, rmCmd.args, {
             ignoreReturnCode: true
@@ -449,7 +331,7 @@ actionsToolkit.run(
 
     if (stateHelper.certsDir.length > 0 && fs.existsSync(stateHelper.certsDir)) {
       await core.group(`Cleaning up certificates`, async () => {
-        fs.rmSync(stateHelper.certsDir, { recursive: true });
+        fs.rmSync(stateHelper.certsDir, {recursive: true});
       });
     }
   }
