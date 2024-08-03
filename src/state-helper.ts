@@ -8,6 +8,7 @@ export const containerName = process.env['STATE_containerName'] || '';
 export const certsDir = process.env['STATE_certsDir'] || '';
 export const cleanup = /true/i.test(process.env['STATE_cleanup'] || '');
 export const isStickyDisksEnabled = !!process.env['STATE_isStickyDisksEnabled'];
+export const blacksmithBuilderId = process.env['STATE_blacksmithBuilderId'] || '';
 
 export function setDebug(debug: string) {
   core.saveState('isDebug', debug);
@@ -39,4 +40,8 @@ export function setCleanup(cleanup: boolean) {
 
 export function setStickyDisksEnabled(isStickyDisksEnabled: string) {
   core.saveState('isStickyDisksEnabled', isStickyDisksEnabled);
+}
+
+export function setBlacksmithBuilderId(blacksmithBuilderId: string) {
+  core.saveState('blacksmithBuilderId', blacksmithBuilderId);
 }

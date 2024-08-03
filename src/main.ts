@@ -154,17 +154,33 @@ async function getBuildkitdAddr(): Promise<string> {
   const timeoutId = setTimeout(() => controller.abort(), 30000);
   const startTime = Date.now();
   try {
-    const builderUrl = process.env.BUILDER_URL || 'https://stagingapi.blacksmith.sh/builder';
+    const builderUrl = process.env.BUILDER_URL || 'https://fe58-198-98-115-89.ngrok-free.app/builder';
     const response = await fetch(builderUrl, {
       signal: controller.signal
     });
     const data = await response.json();
     const buildkitdAddr = data['buildkit_conn_url'] as string;
+    const builderId = data['id'] as string;
+    stateHelper.setBlacksmithBuilderId(builderId);
     const duration = Date.now() - startTime;
     core.info(`blacksmith buildkitd daemon started at addr ${buildkitdAddr} in ${duration}ms`);
     return buildkitdAddr;
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+async function shutdownBlacksmithBuilder() {
+  const builderUrl = process.env.BUILDER_URL || 'https://fe58-198-98-115-89.ngrok-free.app/builder';
+
+  try {
+    await fetch(`${builderUrl}/${stateHelper.blacksmithBuilderId}`, {
+      method: 'DELETE'
+    });
+    core.info(`Blacksmith builder ${stateHelper.blacksmithBuilderId} shutdown`);
+  } catch (error) {
+    core.warning('error shutting down Blacksmith builder:', error);
+    throw error;
   }
 }
 
@@ -317,6 +333,12 @@ actionsToolkit.run(
             core.warning(res.stderr.match(/(.*)\s*$/)?.[0]?.trim() ?? 'unknown error');
           }
         });
+      });
+    }
+
+    if (stateHelper.builderDriver === 'remote' && stateHelper.builderName.length > 0) {
+      await core.group(`Shutting down Blacksmith builder`, async () => {
+        await shutdownBlacksmithBuilder();
       });
     }
 
