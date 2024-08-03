@@ -149,12 +149,31 @@ async function writeBuildkitdTomlFile(): Promise<void> {
   }
 }
 
+async function getBuildkitdAddr(): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const startTime = Date.now();
+  try {
+    const builderUrl = process.env.BUILDER_URL || 'https://stagingapi.blacksmith.sh/builder';
+    const response = await fetch(builderUrl, {
+      signal: controller.signal
+    });
+    const data = await response.json();
+    const buildkitdAddr = data['buildkit_conn_url'] as string;
+    const duration = Date.now() - startTime;
+    core.info(`blacksmith buildkitd daemon started at addr ${buildkitdAddr} in ${duration}ms`);
+    return buildkitdAddr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 actionsToolkit.run(
   // main
   async () => {
     // Start the buildkitd daemon.
     core.debug('creating remote builder');
-    const buildkitdAddr = 'tcp://54.90.77.211:4242';
+    const buildkitdAddr = await getBuildkitdAddr();
     core.debug(`buildkitd daemon started at addr ${buildkitdAddr}`);
 
     const inputs: context.Inputs = await context.getInputs();
