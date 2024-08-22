@@ -169,7 +169,7 @@ async function getBuildkitdAddr(): Promise<string> {
     stateHelper.setBlacksmithRootCaCertificate(rootCaCertificate);
 
     const startTime = Date.now();
-    while (Date.now() - startTime < 15000) {
+    while (Date.now() - startTime < 60000) {
       const response = await fetch(builderUrl + '/' + taskId, {
         method: 'GET'
       });
