@@ -174,15 +174,15 @@ async function getBuildkitdAddr(): Promise<string> {
         method: 'GET'
       });
       const data = await response.json();
-      const ec2Instance = data['ec2_instance'] ? JSON.parse(data['ec2_instance']) : null;
+      const ec2Instance = data['ec2_instance'] ?? null;
       if (ec2Instance) {
         const elapsedTime = Date.now() - startTime;
         core.info(`Got EC2 instance IP after ${elapsedTime} ms`);
-        return ec2Instance['instance_ip'] as string;
+        return `tcp://${ec2Instance['instance_ip']}:4242` as string;
       }
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
-    throw new Error('Failed to get EC2 instance within 15 seconds');
+    throw new Error('Failed to get EC2 instance within 60 seconds');
   } finally {
     clearTimeout(timeoutId);
   }
