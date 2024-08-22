@@ -8,7 +8,10 @@ export const containerName = process.env['STATE_containerName'] || '';
 export const certsDir = process.env['STATE_certsDir'] || '';
 export const cleanup = /true/i.test(process.env['STATE_cleanup'] || '');
 export const isStickyDisksEnabled = !!process.env['STATE_isStickyDisksEnabled'];
-export const blacksmithBuilderId = process.env['STATE_blacksmithBuilderId'] || '';
+export const blacksmithBuildTaskId = process.env['STATE_blacksmithBuildTaskId'] || '';
+export const blacksmithClientKey = process.env['STATE_blacksmithClientKey'] || '';
+export const blacksmithClientCaCertificate = process.env['STATE_blacksmithClientCaCertificate'] || '';
+export const blacksmithRootCaCertificate = process.env['STATE_blacksmithRootCaCertificate'] || '';
 
 export function setDebug(debug: string) {
   core.saveState('isDebug', debug);
@@ -42,6 +45,18 @@ export function setStickyDisksEnabled(isStickyDisksEnabled: string) {
   core.saveState('isStickyDisksEnabled', isStickyDisksEnabled);
 }
 
-export function setBlacksmithBuilderId(blacksmithBuilderId: string) {
-  core.saveState('blacksmithBuilderId', blacksmithBuilderId);
+export function setBlacksmithBuildTaskId(blacksmithBuildTaskId: string) {
+  core.saveState('blacksmithBuildTaskId', blacksmithBuildTaskId);
+}
+
+export function setBlacksmithClientKey(blacksmithClientKey: string) {
+  core.saveState('blacksmithClientKey', blacksmithClientKey);
+}
+
+export function setBlacksmithClientCaCertificate(blacksmithClientCaCertificate: string) {
+  core.saveState('blacksmithClientCaCertificate', blacksmithClientCaCertificate);
+}
+
+export function setBlacksmithRootCaCertificate(blacksmithRootCaCertificate: string) {
+  core.saveState('blacksmithRootCaCertificate', blacksmithRootCaCertificate);
 }

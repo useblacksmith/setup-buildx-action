@@ -152,19 +152,37 @@ async function writeBuildkitdTomlFile(): Promise<void> {
 async function getBuildkitdAddr(): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
-  const startTime = Date.now();
   try {
-    const builderUrl = process.env.BUILDER_URL || 'https://fe58-198-98-115-89.ngrok-free.app/builder';
+    const builderUrl = process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks';
     const response = await fetch(builderUrl, {
-      signal: controller.signal
+      method: 'POST'
     });
+
     const data = await response.json();
-    const buildkitdAddr = data['buildkit_conn_url'] as string;
-    const builderId = data['id'] as string;
-    stateHelper.setBlacksmithBuilderId(builderId);
-    const duration = Date.now() - startTime;
-    core.info(`blacksmith buildkitd daemon started at addr ${buildkitdAddr} in ${duration}ms`);
-    return buildkitdAddr;
+    const taskId = data['id'] as string;
+    stateHelper.setBlacksmithBuildTaskId(taskId);
+    const clientKey = data['client_key'] as string;
+    stateHelper.setBlacksmithClientKey(clientKey);
+    const clientCaCertificate = data['client_ca_certificate'] as string;
+    stateHelper.setBlacksmithClientCaCertificate(clientCaCertificate);
+    const rootCaCertificate = data['root_ca_certificate'] as string;
+    stateHelper.setBlacksmithRootCaCertificate(rootCaCertificate);
+
+    const startTime = Date.now();
+    while (Date.now() - startTime < 15000) {
+      const response = await fetch(builderUrl + '/' + taskId, {
+        method: 'GET'
+      });
+      const data = await response.json();
+      const ec2Instance = data['ec2_instance'] ? JSON.parse(data['ec2_instance']) : null;
+      if (ec2Instance) {
+        const elapsedTime = Date.now() - startTime;
+        core.info(`Got EC2 instance IP after ${elapsedTime} ms`);
+        return ec2Instance['instance_ip'] as string;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error('Failed to get EC2 instance within 15 seconds');
   } finally {
     clearTimeout(timeoutId);
   }
@@ -174,10 +192,10 @@ async function shutdownBlacksmithBuilder() {
   const builderUrl = process.env.BUILDER_URL || 'https://fe58-198-98-115-89.ngrok-free.app/builder';
 
   try {
-    await fetch(`${builderUrl}/${stateHelper.blacksmithBuilderId}`, {
+    await fetch(`${builderUrl}/${stateHelper.blacksmithBuildTaskId}`, {
       method: 'DELETE'
     });
-    core.info(`Blacksmith builder ${stateHelper.blacksmithBuilderId} shutdown`);
+    core.info(`Blacksmith builder ${stateHelper.blacksmithBuildTaskId} shutdown`);
   } catch (error) {
     core.warning('error shutting down Blacksmith builder:', error);
     throw error;
