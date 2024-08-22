@@ -174,7 +174,7 @@ async function getBuildkitdAddr(): Promise<string> {
         method: 'GET'
       });
       const data = await response.json();
-      const ec2Instance = data['ec2_instance'] ? JSON.parse(data['ec2_instance']) : null;
+      const ec2Instance = data['ec2_instance'] ?? null;
       if (ec2Instance) {
         const elapsedTime = Date.now() - startTime;
         core.info(`Got EC2 instance IP after ${elapsedTime} ms`);
