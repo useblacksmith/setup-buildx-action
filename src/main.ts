@@ -153,7 +153,7 @@ async function getBuildkitdAddr(): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
   try {
-    const builderUrl = process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks';
+    const builderUrl = process.env.BUILDER_URL || 'https://d2e228t9tc4b9i.cloudfront.net/build_tasks';
     const response = await fetch(builderUrl, {
       method: 'POST'
     });
