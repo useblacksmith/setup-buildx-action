@@ -153,7 +153,7 @@ async function getBuildkitdAddr(): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
   try {
-    const builderUrl = process.env.BUILDER_URL || 'https://d2e228t9tc4b9i.cloudfront.net/build_tasks';
+    const builderUrl = process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks';
     const response = await fetch(builderUrl, {
       method: 'POST'
     });
@@ -174,6 +174,7 @@ async function getBuildkitdAddr(): Promise<string> {
         method: 'GET'
       });
       const data = await response.json();
+      core.info(`Got response from Blacksmith builder ${taskId}: ${JSON.stringify(data, null, 2)}`);
       const ec2Instance = data['ec2_instance'] ?? null;
       if (ec2Instance) {
         const elapsedTime = Date.now() - startTime;
@@ -182,6 +183,10 @@ async function getBuildkitdAddr(): Promise<string> {
       }
       await new Promise(resolve => setTimeout(resolve, 200));
     }
+
+    await fetch(`${builderUrl}/${stateHelper.blacksmithBuildTaskId}`, {
+      method: 'DELETE'
+    });
     throw new Error('Failed to get EC2 instance within 60 seconds');
   } finally {
     clearTimeout(timeoutId);
@@ -189,7 +194,7 @@ async function getBuildkitdAddr(): Promise<string> {
 }
 
 async function shutdownBlacksmithBuilder() {
-  const builderUrl = process.env.BUILDER_URL || 'https://fe58-198-98-115-89.ngrok-free.app/builder';
+  const builderUrl = process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks';
 
   try {
     await fetch(`${builderUrl}/${stateHelper.blacksmithBuildTaskId}`, {
