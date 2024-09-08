@@ -10,7 +10,7 @@ import {Util} from '@docker/actions-toolkit/lib/util';
 import {promisify} from 'util';
 import {exec} from 'child_process';
 import * as TOML from '@iarna/toml';
-import axios from 'axios';
+import axios, {AxiosInstance} from 'axios';
 
 import * as context from './context';
 import * as stateHelper from './state-helper';
@@ -149,16 +149,23 @@ async function writeBuildkitdTomlFile(): Promise<void> {
   }
 }
 
+async function getBlacksmithHttpClient(): Promise<AxiosInstance> {
+  return axios.create({
+    baseURL: process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks',
+    headers: {
+      Authorization: `Bearer ${process.env.BLACKSMITH_ANVIL_TOKEN}`
+    }
+  });
+}
+
 async function getBuildkitdAddr(): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 30000);
   try {
-    const builderUrl = process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks';
-    const response = await fetch(builderUrl, {
-      method: 'POST'
-    });
+    const client = await getBlacksmithHttpClient();
+    const response = await client.post('');
 
-    const data = await response.json();
+    const data = response.data;
     const taskId = data['id'] as string;
     stateHelper.setBlacksmithBuildTaskId(taskId);
     const clientKey = data['client_key'] as string;
@@ -170,10 +177,8 @@ async function getBuildkitdAddr(): Promise<string> {
 
     const startTime = Date.now();
     while (Date.now() - startTime < 60000) {
-      const response = await fetch(builderUrl + '/' + taskId, {
-        method: 'GET'
-      });
-      const data = await response.json();
+      const response = await client.get(`/${taskId}`);
+      const data = response.data;
       core.info(`Got response from Blacksmith builder ${taskId}: ${JSON.stringify(data, null, 2)}`);
       const ec2Instance = data['ec2_instance'] ?? null;
       if (ec2Instance) {
@@ -184,25 +189,20 @@ async function getBuildkitdAddr(): Promise<string> {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
 
-    await fetch(`${builderUrl}/${stateHelper.blacksmithBuildTaskId}`, {
-      method: 'DELETE'
-    });
+    await client.post(`/${stateHelper.blacksmithBuildTaskId}/abandon`);
     throw new Error('Failed to get EC2 instance within 60 seconds');
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function shutdownBlacksmithBuilder() {
-  const builderUrl = process.env.BUILDER_URL || 'https://d04fa050a7b2.ngrok.app/build_tasks';
-
+async function reportBuildCompleted() {
   try {
-    await fetch(`${builderUrl}/${stateHelper.blacksmithBuildTaskId}`, {
-      method: 'DELETE'
-    });
-    core.info(`Blacksmith builder ${stateHelper.blacksmithBuildTaskId} shutdown`);
+    const client = await getBlacksmithHttpClient();
+    const response = await client.post(`/${stateHelper.blacksmithBuildTaskId}/complete`);
+    core.info(`Blacksmith builder ${stateHelper.blacksmithBuildTaskId} completed: ${JSON.stringify(response.data)}`);
   } catch (error) {
-    core.warning('error shutting down Blacksmith builder:', error);
+    core.warning('Error completing Blacksmith build:', error);
     throw error;
   }
 }
@@ -361,7 +361,7 @@ actionsToolkit.run(
 
     if (stateHelper.builderDriver === 'remote' && stateHelper.builderName.length > 0) {
       await core.group(`Shutting down Blacksmith builder`, async () => {
-        await shutdownBlacksmithBuilder();
+        await reportBuildCompleted();
       });
     }
 
