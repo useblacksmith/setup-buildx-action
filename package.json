@@ -29,7 +29,7 @@
     "@docker/actions-toolkit": "^0.23.0",
     "@iarna/toml": "^2.2.5",
     "axios": "^1.7.2",
-    "fs": "^0.0.1-security",
+    "fs": "^0.0.2",
     "js-yaml": "^4.1.0",
     "portfinder": "^1.0.32",
     "toml": "^3.0.0",
