@@ -31,7 +31,7 @@
     "axios": "^1.7.2",
     "fs": "^0.0.1-security",
     "js-yaml": "^4.1.0",
-    "portfinder": "^1.0.32",
+    "portfinder": "^1.0.37",
     "toml": "^3.0.0",
     "uuid": "^9.0.1"
   },
