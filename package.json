@@ -26,7 +26,7 @@
   "packageManager": "yarn@3.6.3",
   "dependencies": {
     "@actions/core": "^1.10.1",
-    "@docker/actions-toolkit": "^0.23.0",
+    "@docker/actions-toolkit": "^0.52.0",
     "@iarna/toml": "^2.2.5",
     "axios": "^1.7.2",
     "fs": "^0.0.1-security",
